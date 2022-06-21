@@ -1,0 +1,6 @@
+C:\Users\yossi\source\repos\AmigaSprite\AmigaSprite\obj\Debug\AmigaSprite.csproj.AssemblyReference.cache
+C:\Users\yossi\source\repos\AmigaSprite\AmigaSprite\obj\Debug\AmigaSprite.csproj.CoreCompileInputs.cache
+C:\Users\yossi\source\repos\AmigaSprite\AmigaSprite\bin\Debug\AmigaSprite.dll
+C:\Users\yossi\source\repos\AmigaSprite\AmigaSprite\bin\Debug\AmigaSprite.pdb
+C:\Users\yossi\source\repos\AmigaSprite\AmigaSprite\obj\Debug\AmigaSprite.dll
+C:\Users\yossi\source\repos\AmigaSprite\AmigaSprite\obj\Debug\AmigaSprite.pdb
