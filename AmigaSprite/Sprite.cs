@@ -62,7 +62,7 @@ namespace AmigaSprite
         public enum ColorReductionAlgorithem
         {
             DeepCycle,           // My algorithem. Slow but thorow. It goes over all the colors in the image and reducing by Everaging every two dimilar colors each time.
-            MedianCut,
+            MedianCut
         }
 
         struct ColorCount
@@ -109,14 +109,14 @@ namespace AmigaSprite
 
         }
         public SpriteStructure spriteData;
-
+       
         //------------------------------------------------------------------------------------------
         // Loading and converting image to Amiga Sprite format
         // It does not set Color 0 in the correct position (which is 0)
         // Need to mark color 0, which is transparent on the amiga, as transparent in the image 
         // to be converted using graphics tool
         //------------------------------------------------------------------------------------------
-        public void ImportImage(string fileName, ColorReductionAlgorithem colorAlg, ColorAvaragingMethod cam = ColorAvaragingMethod.RelaativeToNumberOfInstances)
+        public void ImportImage(string fileName, ColorReductionAlgorithem colorAlg = ColorReductionAlgorithem.DeepCycle, ColorAvaragingMethod cam = ColorAvaragingMethod.RelaativeToNumberOfInstances)
         {
             //Sprite spriteImage = new Sprite();
 
@@ -191,7 +191,8 @@ namespace AmigaSprite
                             CountColors();
                             ReduceTo16Colors(colorAlg,cam);
                             spriteData.SpriteData = new ulong[NumOfSprites(), 2, spriteData.NumOfRaws];
-                            ConvertImageToBitplanes();
+                            CopyColorsToPallate(ColorReductionAlgorithem.DeepCycle);
+                            ConvertImageToBitplanes(ColorReductionAlgorithem.DeepCycle);
 
 
                           
@@ -205,12 +206,12 @@ namespace AmigaSprite
                             //Backets[0].Add(SystemColors.Control);
                             DevideToBackets();
                             AvaragingToPallate();
-                            CopyColorsToPallate();
+                            CopyColorsToPallate(ColorReductionAlgorithem.MedianCut);
                             spriteData.SpriteWidth = (byte)Width;
                             spriteData.NumOfRaws = Height;
                             spriteData.Attached = true;
-
-                            ConvertImageToBitplanes();
+                            spriteData.SpriteData = new ulong[NumOfSprites(), 2, spriteData.NumOfRaws];
+                            ConvertImageToBitplanes(ColorReductionAlgorithem.MedianCut);
                         break;
 
                     }
@@ -486,7 +487,8 @@ namespace AmigaSprite
                         colors.RemoveAll(x => x.color == similarColors.color1.color);
                         colors.RemoveAll(x => x.color == similarColors.color2.color);
                         colors.Add(newCC);
-                        progressBar.Value = ProgressBarMax - colors.Count + 16;
+                        if (progressBar != null)
+                            progressBar.Value = ProgressBarMax - colors.Count + 16;
                     }
                     break;
                 case ColorReductionAlgorithem.MedianCut:
@@ -643,7 +645,7 @@ namespace AmigaSprite
         {
             for (int i = 0; i < colors.Count; i++)
             {
-                if (colors[i].color.R == color.R && colors[i].color.G == color.G && colors[i].color.B == color.B)
+                if (colors[i].color == color)
                 {
                     ColorCount count = new ColorCount();
                     count.color = colors[i].color;
@@ -695,17 +697,44 @@ namespace AmigaSprite
             return Color.FromArgb(Red, Green, Blue);
         }
 
-        private void ConvertImageToBitplanes()
+        public void ConvertImageToBitplanes(ColorReductionAlgorithem Alg)
         {
-  
+            Color pixelColor;
+            int ColorIdx;
             byte colorInPalate;
+
+
             for (int y = 0; y < bitmap.Height; y++)
                 for (int x = 0; x < bitmap.Width; x++)
                 {
-                    colorInPalate = ConvertColorToPalate(bitmap.GetPixel(x, y));
-                    SetPixel(x, y, colorInPalate);
-
+                    switch (Alg)
+                    {
+                        case ColorReductionAlgorithem.DeepCycle:
+                            pixelColor = bitmap.GetPixel(x, y);
+                            ColorIdx = GetColorPositionInPallate(pixelColor);
+                            SetPixel(x, y, (ulong)ColorIdx);
+                            break;
+                        case ColorReductionAlgorithem.MedianCut:
+                            colorInPalate = ConvertColorToPalate(bitmap.GetPixel(x, y));
+                            SetPixel(x, y, colorInPalate);
+                            break;
+                    }
                 }
+        }
+
+        public int GetColorPositionInPallate(Color colorToFind)
+        {
+            //if (colorToFind.A != 0)
+            // {
+            for (int i = 0; i < colors.Count; i++)
+            {
+                if (colors[i].color == colorToFind)
+                {
+                    return i;
+                }
+            }
+            // }
+            return 0;
         }
 
         private byte ConvertColorToPalate(Color color)
@@ -721,14 +750,34 @@ namespace AmigaSprite
             }
             return 0;
         }
-
-        private void CopyColorsToPallate()
+        private void CopyColorsToPallate(ColorReductionAlgorithem arg)
         {
-            for (int i = 0; i < 16; i++)
+            if (spriteData.Colors == null)
+                spriteData.Colors = new int[16];
+            switch (arg)
             {
-                spriteData.Colors[i] = Pallate[i].ToArgb();
-            }
-            spriteData.NumOfColors = 16;
+   
+                case ColorReductionAlgorithem.DeepCycle:
+                    for (int i = 0; i < colors.Count; i++)
+                    {
+                        spriteData.Colors[i] = colors[i].color.ToArgb();
+                    }
+
+                    if (colors.Count > 4)
+                        spriteData.NumOfColors = 16;
+                    else
+                        spriteData.NumOfColors = 4;
+
+                    spriteData.Colors[0] = SystemColors.Control.ToArgb();
+                    break;
+                case ColorReductionAlgorithem.MedianCut:
+                    for (int i = 0; i < 16; i++)
+                    {
+                        spriteData.Colors[i] = Pallate[i].ToArgb();
+                    }
+                    spriteData.NumOfColors = 16;
+                    break;
+        }
         }
     }
 }
