@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-
+using System.Windows.Forms;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -15,6 +15,37 @@ namespace AmigaSprite
     public class Sprite
     {
         const int LowWord = 0, HiWord = 1, MainSprite = 0, AttachedSprite = 1;
+        public ToolStripProgressBar progressBar;
+        List<ColorCount> colors = new List<ColorCount>();
+        Bitmap bitmap;
+
+        // MedianCut registers
+        List<Color>[] Backets = new List<Color>[16];
+        List<Color> OrgenizedColors = new List<Color>();
+        Color[] Pallate = new Color[16];
+
+        enum DominantColor
+        {
+            Red,
+            Green,
+            Blue
+        }
+
+        public int Height
+        {
+            get
+            {
+                return bitmap.Height;
+            }
+        }
+
+        public int Width
+        {
+            get
+            {
+                return bitmap.Width;
+            }
+        }
 
         public enum Chipset
         {
@@ -26,6 +57,26 @@ namespace AmigaSprite
             _16Pixels,
             _32Pixels,
             _64Pixels
+        }
+
+        public enum ColorReductionAlgorithem
+        {
+            DeepCycle,           // My algorithem. Slow but thorow. It goes over all the colors in the image and reducing by Everaging every two dimilar colors each time.
+            MedianCut,
+        }
+
+        struct ColorCount
+        {
+            public Color color;
+            public uint Instances;
+        }
+
+        struct SimilarColors
+        {
+            public ColorCount color1;
+            public uint color1Idx;
+            public ColorCount color2;
+            public uint color2Idx;
         }
 
         public struct SpriteStructure
@@ -65,22 +116,22 @@ namespace AmigaSprite
         // Need to mark color 0, which is transparent on the amiga, as transparent in the image 
         // to be converted using graphics tool
         //------------------------------------------------------------------------------------------
-        public void ImportImage(string fileName)
+        public void ImportImage(string fileName, ColorReductionAlgorithem colorAlg, ColorAvaragingMethod cam = ColorAvaragingMethod.RelaativeToNumberOfInstances)
         {
-            Sprite spriteImage = new Sprite();
+            //Sprite spriteImage = new Sprite();
 
-            Bitmap bmp = new Bitmap(fileName);
+            bitmap = new Bitmap(fileName);
 
             ColorPalette pallate;
             IntPtr intPtr = IntPtr.Zero;
 
-            if (bmp.PixelFormat == PixelFormat.Format4bppIndexed)
+            if (bitmap.PixelFormat == PixelFormat.Format4bppIndexed || bitmap.PixelFormat == PixelFormat.Format1bppIndexed)
             {
 
-                Rectangle rec = new Rectangle(0, 0, bmp.Width, bmp.Height);
-                BitmapData data = bmp.LockBits(rec, ImageLockMode.ReadWrite, PixelFormat.Format4bppIndexed);
+                Rectangle rec = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+                BitmapData data = bitmap.LockBits(rec, ImageLockMode.ReadWrite, PixelFormat.Format4bppIndexed);
 
-                pallate = bmp.Palette;
+                pallate = bitmap.Palette;
                 if (pallate.Entries.Count() <= 16)
                 {
                     if (pallate.Entries.Count() > 4) spriteData.Attached = true;
@@ -91,8 +142,19 @@ namespace AmigaSprite
                     }
 
 
-                    spriteData.NumOfRaws = bmp.Height;
-                    spriteData.SpriteWidth = (byte)bmp.Width;
+                    spriteData.NumOfRaws = bitmap.Height;
+                    spriteData.SpriteWidth = (byte)bitmap.Width;
+
+                    if (pallate.Entries.Count() > 4)
+                    {
+                        spriteData.Attached = true;             
+                    }
+                    else
+                    {
+                        spriteData.Attached = false;
+                    }
+
+                    spriteData.SpriteData = new ulong[NumOfSprites(), 2, spriteData.NumOfRaws];
 
                     intPtr = data.Scan0;
                     int NumOfBytes = Math.Abs(data.Stride) * data.Height;
@@ -112,39 +174,101 @@ namespace AmigaSprite
 
                         }
 
-                    bmp.UnlockBits(data);
+                    bitmap.UnlockBits(data);
 
                 }
             }
+            else if (bitmap.PixelFormat == PixelFormat.Format24bppRgb || bitmap.PixelFormat == PixelFormat.Format32bppArgb)
+            {
+                
+                    spriteData.Attached = true;
+
+                    switch (colorAlg)
+                    {
+                        case ColorReductionAlgorithem.DeepCycle:
+                            spriteData.NumOfRaws = Height;
+                            spriteData.SpriteWidth = (byte)Width;
+                            CountColors();
+                            ReduceTo16Colors(colorAlg,cam);
+                            spriteData.SpriteData = new ulong[NumOfSprites(), 2, spriteData.NumOfRaws];
+                            ConvertImageToBitplanes();
+
+
+                          
+                        // Run My Algorithem
+
+                            break;
+                        case ColorReductionAlgorithem.MedianCut:
+                            ListTheColors();
+                            SortByColor(FindTheDominantColor());
+                            //Backets[0] = new List<Color>();
+                            //Backets[0].Add(SystemColors.Control);
+                            DevideToBackets();
+                            AvaragingToPallate();
+                            CopyColorsToPallate();
+                            spriteData.SpriteWidth = (byte)Width;
+                            spriteData.NumOfRaws = Height;
+                            spriteData.Attached = true;
+
+                            ConvertImageToBitplanes();
+                        break;
+
+                    }
+               
+            }
+            else
+                MessageBox.Show("Color Pallate need to be 4 or 16 colors only!", "Pallate Error", MessageBoxButtons.OK);
 
         }
 
+        public void CountColors()
+        {
+            colors.Clear();
+            for (int y = 0; y < Height; y++)
+                for (int x = 0; x < Width; x++)
+                {
+                    Color Tcolor = new Color();
+                    ColorCount colorCount = new ColorCount();
+                    Tcolor = bitmap.GetPixel(x, y);
+                    colorCount.color = Tcolor;
+                    //colorCount.color = Tcolor;
+                    colorCount.Instances = 1;
+                    if (!isInList(colorCount.color) /*&& colorCount.color.A != 0*/)
+                    {
+                        colors.Add(colorCount);
+                    }
+                }
+
+        }
+
+        private int NumOfSprites ()
+        {
+            return spriteData.Attached ? 2 : 1;
+        }
 
         public void ImportIndexedImage(string fileName)
         {
-            Sprite spriteImage = new Sprite();
+            //Sprite spriteImage = new Sprite();
 
-            Bitmap bmp = new Bitmap(fileName);
+            bitmap = new Bitmap(fileName);
 
             ColorPalette pallate;
             IntPtr intPtr = IntPtr.Zero;
 
-            Rectangle rec = new Rectangle(0, 0, bmp.Width, bmp.Height);
-            BitmapData data = bmp.LockBits(rec, ImageLockMode.ReadWrite, PixelFormat.Format4bppIndexed);
+            Rectangle rec = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+            BitmapData data = bitmap.LockBits(rec, ImageLockMode.ReadWrite, PixelFormat.Format4bppIndexed);
 
             intPtr = data.Scan0;
             int NumOfBytes = Math.Abs(data.Stride) * data.Height;
             byte[] indexValues = new byte[NumOfBytes];
             Marshal.Copy(intPtr, indexValues, 0, NumOfBytes);
+            int NumOfSprites;
 
-            switch (bmp.PixelFormat)
+            switch (bitmap.PixelFormat)
             {
                 case PixelFormat.Format4bppIndexed:
 
-
-
-
-                    pallate = bmp.Palette;
+                    pallate = bitmap.Palette;
                     if (pallate.Entries.Count() <= 16)
                     {
                         if (pallate.Entries.Count() > 4) spriteData.Attached = true;
@@ -155,9 +279,21 @@ namespace AmigaSprite
                         }
 
 
-                        spriteData.NumOfRaws = bmp.Height;
-                        spriteData.SpriteWidth = (byte)bmp.Width;
+                        spriteData.NumOfRaws = bitmap.Height;
+                        spriteData.SpriteWidth = (byte)bitmap.Width;
 
+                        if (pallate.Entries.Count() > 4)
+                        {
+                            spriteData.Attached = true;
+                            NumOfSprites = 2;
+                        }
+                        else
+                        {
+                            spriteData.Attached=false;
+                            NumOfSprites = 1;
+                        }
+
+                        spriteData.SpriteData = new ulong[NumOfSprites,2,spriteData.NumOfRaws];
 
                         byte Nimble;
 
@@ -173,7 +309,7 @@ namespace AmigaSprite
 
                             }
 
-                        bmp.UnlockBits(data);
+                        bitmap.UnlockBits(data);
 
                     }
                     break;
@@ -309,6 +445,290 @@ namespace AmigaSprite
         public void Save(string fileName)
         {
 
+        }
+       public enum ColorAvaragingMethod
+        {
+            RelaativeToNumberOfInstances,
+            NonRelative
+        }
+        public void ReduceTo16Colors(ColorReductionAlgorithem redunctionAlg = ColorReductionAlgorithem.DeepCycle,ColorAvaragingMethod cam = ColorAvaragingMethod.RelaativeToNumberOfInstances)
+        {
+            spriteData.Attached = true;
+            spriteData.NumOfColors = 16;
+
+            switch (redunctionAlg)
+            {
+                case ColorReductionAlgorithem.DeepCycle:
+                    SimilarColors similarColors;
+                    Color AvgColor;
+                    int ProgressBarMax = colors.Count;
+                    if (progressBar != null)
+                    {
+                        progressBar.Maximum = colors.Count;
+                        progressBar.Minimum = 16;
+                        //progressBar.Value = 0;
+                    }
+
+
+                    while (colors.Count > 16)
+                    {
+                        similarColors = FindCloseColors();
+                        if (cam == ColorAvaragingMethod.RelaativeToNumberOfInstances)
+                            AvgColor = AvarageColors(similarColors.color1, similarColors.color2);
+                        else
+                            AvgColor = AvarageColors(similarColors.color1.color, similarColors.color2.color);
+
+                        ReplaceColors(similarColors, AvgColor);
+                        ColorCount newCC = new ColorCount();
+                        newCC.color = AvgColor;
+                        newCC.Instances = similarColors.color1.Instances + similarColors.color2.Instances;
+
+                        colors.RemoveAll(x => x.color == similarColors.color1.color);
+                        colors.RemoveAll(x => x.color == similarColors.color2.color);
+                        colors.Add(newCC);
+                        progressBar.Value = ProgressBarMax - colors.Count + 16;
+                    }
+                    break;
+                case ColorReductionAlgorithem.MedianCut:
+                    break;
+            }
+        }
+
+        public Color AvarageColors(Color color1, Color color2)
+        {
+
+            int Red = (color1.R + color2.R) / 2;
+            int Green = (color1.G + color2.G) / 2;
+            int Blue = (color1.B + color2.B) / 2;
+            return Color.FromArgb(255, Red, Green, Blue);
+        }
+
+        private Color AvarageColors(ColorCount color1, ColorCount color2)
+        {
+            int TotalInstances = (int)(color1.Instances + color2.Instances);
+            int Red = (int)Math.Round((decimal)(color1.Instances * color1.color.R + color2.Instances * color2.color.R) / TotalInstances);
+            int Green = (int)Math.Round((decimal)(color1.Instances * color1.color.G + color2.Instances * color2.color.G) / TotalInstances);
+            int Blue = (int)Math.Round((decimal)(color1.Instances * color1.color.B + color2.Instances * color2.color.B) / TotalInstances);
+            return Color.FromArgb(255, Red, Green, Blue);
+
+        }
+
+
+        private void ReplaceColors(SimilarColors sc, Color NewColor)
+        {
+            for (int y = 0; y < bitmap.Height; y++)
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+
+                    if (bitmap.GetPixel(x, y) == sc.color1.color || bitmap.GetPixel(x, y) == sc.color2.color)
+                    {
+                        bitmap.SetPixel(x, y, NewColor);
+                    }
+                }
+        }
+
+        private SimilarColors FindCloseColors()
+        {
+            //ColorCount[] TwoCloseColors = new ColorCount[2];
+            SimilarColors TwoCloseColors = new SimilarColors();
+            float Difiration = 1, TempDifiration;
+
+            for (int i = 1; i < colors.Count; i++)
+                for (int j = i + 1; j < colors.Count; j++)
+                {
+                    TempDifiration = ColorDifference(colors[i].color, colors[j].color);
+
+                    if (TempDifiration < Difiration)
+                    {
+                        Difiration = TempDifiration;
+                        TwoCloseColors.color1 = colors[i];
+                        TwoCloseColors.color1Idx = (uint)i;
+                        TwoCloseColors.color2 = colors[j];
+                        TwoCloseColors.color2Idx = (uint)j;
+                    }
+                }
+
+            return TwoCloseColors;
+
+        }
+
+        private float ColorDifference(Color color1, Color color2)
+        {
+            float RedDiff = Math.Abs(color1.R - color2.R) / 255f;
+            return (Math.Abs(color1.R - color2.R) / 255f + Math.Abs(color1.G - color2.G) / 255f + Math.Abs(color1.B - color2.B) / 255f) / 3f;
+        }
+
+        //-------------------------------------------------------------------------------------
+        // MedianCut methods
+        //-------------------------------------------------------------------------------------
+
+        private DominantColor FindTheDominantColor()
+        {
+            Color pixelColor;
+            uint Red = 0, Green = 0, Blue = 0;
+
+            for (int y = 0; y < bitmap.Height; y++)
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    pixelColor = bitmap.GetPixel(x, y);
+                    Red += pixelColor.R;
+                    Green += pixelColor.G;
+                    Blue += pixelColor.B;
+                }
+
+            if (Red > Green && Red > Blue)
+                return DominantColor.Red;
+            else if (Blue > Green && Blue > Red)
+                return DominantColor.Blue;
+            else
+                return DominantColor.Green;
+        }
+
+        private void SortByColor(DominantColor color)
+        {
+
+            int DeltaColor = 0;
+            while (colors.Count > 0)
+            {
+                int selectedColorIdx = 0;
+                for (int i = 0; i < colors.Count; i++)
+                {
+
+                    switch (color)
+                    {
+                        case DominantColor.Red:
+                            if (colors[i].color.R > colors[selectedColorIdx].color.R)
+                                selectedColorIdx = i;
+                            break;
+                        case DominantColor.Green:
+                            if (colors[i].color.G > colors[selectedColorIdx].color.G)
+                                selectedColorIdx = i;
+                            break;
+                        case DominantColor.Blue:
+                            if (colors[i].color.B > colors[selectedColorIdx].color.B)
+                                selectedColorIdx = i;
+                            break;
+                    }
+                }
+                OrgenizedColors.Add(colors[selectedColorIdx].color);
+                colors.RemoveAt(selectedColorIdx);
+            }
+        }
+
+        public void ListTheColors()
+        {
+            colors.Clear();
+            for (int y = 0; y < bitmap.Height; y++)
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    Color Tcolor = new Color();
+                    ColorCount colorCount = new ColorCount();
+                    Tcolor = bitmap.GetPixel(x, y);
+
+                    // Fix transparent colors on images that have colors that are transparency
+
+                    colorCount.color = Color.FromArgb(255, Tcolor.R, Tcolor.G, Tcolor.B);
+                    //colorCount.color = Tcolor;
+                    colorCount.Instances = 1;
+                    if (!isInList(colorCount.color) && colorCount.color.A != 0)
+                    {
+                        colors.Add(colorCount);
+
+                    }
+                }
+
+        }
+
+        private bool isInList(Color color)
+        {
+            for (int i = 0; i < colors.Count; i++)
+            {
+                if (colors[i].color.R == color.R && colors[i].color.G == color.G && colors[i].color.B == color.B)
+                {
+                    ColorCount count = new ColorCount();
+                    count.color = colors[i].color;
+                    count.Instances = colors[i].Instances + 1;
+                    colors[i] = count;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        const int NumOfColorsInPallate = 15;
+        private void DevideToBackets()
+        {
+            for (int i = 0; i < OrgenizedColors.Count; i++)
+            {
+                int idx = i / (OrgenizedColors.Count / NumOfColorsInPallate);
+                if (idx > NumOfColorsInPallate - 1) idx = NumOfColorsInPallate - 1;
+
+                if (Backets[idx] == null)
+                    Backets[idx] = new List<Color>();
+
+                Backets[idx].Add(OrgenizedColors[i]);
+            }
+        }
+
+        private void AvaragingToPallate()
+        {
+            Pallate[0] = SystemColors.Control;
+            for (int i = 0; i < 15; i++)
+                Pallate[i + 1] = AvaragingListColors(Backets[i]);
+        }
+
+        private Color AvaragingListColors(List<Color> colorList)
+        {
+            int Red = 0, Green = 0, Blue = 0;
+
+            for (int i = 0; i < colorList.Count; i++)
+            {
+                Red += colorList[i].R;
+                Green += colorList[i].G;
+                Blue += colorList[i].B;
+            }
+
+            Red /= colorList.Count;
+            Green /= colorList.Count;
+            Blue /= colorList.Count;
+
+            return Color.FromArgb(Red, Green, Blue);
+        }
+
+        private void ConvertImageToBitplanes()
+        {
+  
+            byte colorInPalate;
+            for (int y = 0; y < bitmap.Height; y++)
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    colorInPalate = ConvertColorToPalate(bitmap.GetPixel(x, y));
+                    SetPixel(x, y, colorInPalate);
+
+                }
+        }
+
+        private byte ConvertColorToPalate(Color color)
+        {
+            if (color.A != 0)
+            {
+                for (byte i = 0; i < 15; i++)
+                    foreach (Color c in Backets[i])
+                    {
+                        if (c.R == color.R && c.G == color.G && c.B == color.B)
+                            return (byte)(i + 1);
+                    }
+            }
+            return 0;
+        }
+
+        private void CopyColorsToPallate()
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                spriteData.Colors[i] = Pallate[i].ToArgb();
+            }
+            spriteData.NumOfColors = 16;
         }
     }
 }
